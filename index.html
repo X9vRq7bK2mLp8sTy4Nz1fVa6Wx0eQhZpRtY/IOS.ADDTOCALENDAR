@@ -30,6 +30,7 @@
     }
     .block-day td {
       font-style: italic;
+      background-color: #f9fafb; /* Light gray background for block/weekend days */
     }
   </style>
 </head>
@@ -299,47 +300,84 @@
       return results.concat(manual);
     }
 
+    /* ************************************
+     * FIX: Block Day and Weekend Logic
+     * ************************************/
+
     function parseDateStr(dateStr) {
+      // Corrected month map: Oct is 9, Nov is 10, Dec is 11 (0-indexed)
       const months = { oct: 9, nov: 10, dec: 11 };
       const match = dateStr.match(/(\d{1,2})\s*(Oct|Nov|Dec)/i);
       if (!match) return null;
       const day = parseInt(match[1], 10);
       const month = months[match[2].toLowerCase()];
+      // Set the year to 2025 as the context suggests
       return new Date(2025, month, day);
     }
 
     function addBlockDays(results) {
       if (results.length === 0) return results;
 
+      // 1. Get all unique exam dates (from 27 Oct onwards)
       const examDates = results
         .map(r => parseDateStr(r.dateStr))
-        .filter(d => d !== null && d >= new Date(2025, 9, 27)) // Only from 27 Oct
-        .sort((a, b) => a - b);
+        .filter(d => d !== null && d.getTime() >= new Date(2025, 9, 27).getTime())
+        .map(d => d.getTime()); // Use time value for easy comparison
 
-      if (examDates.length === 0) return results;
+      // Use a Set for fast lookup of exam days
+      const examDateSet = new Set(examDates);
 
-      const start = new Date(2025, 9, 27); // 27 Oct
-      const end = examDates[examDates.length - 1];
+      if (examDateSet.size === 0) return results;
+      
+      const examDatesSorted = Array.from(examDateSet).sort((a, b) => a - b);
+
+      // 2. Define the period to check
+      const start = new Date(2025, 9, 27); // 27 Oct 2025
+      const end = new Date(examDatesSorted[examDatesSorted.length - 1]); // Last exam date
 
       const blockDays = [];
+      const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
       let current = new Date(start);
-      while (current <= end) {
-        const ymd = `${current.getDate()} ${['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][current.getMonth()]}`;
-        const isExamDay = examDates.some(d => d.getTime() === current.getTime());
+      // Loop from the start date up to and including the last exam date
+      while (current.getTime() <= end.getTime()) {
+        const ymd = `${current.getDate()} ${monthNames[current.getMonth() + 1]}`; // +1 because monthNames is 1-indexed
+        const currentTime = current.getTime();
+        const isExamDay = examDateSet.has(currentTime);
+        const dayOfWeek = current.getDay(); // 0 = Sunday, 6 = Saturday
+
         if (!isExamDay) {
-          blockDays.push({
-            subject: 'Block Day',
-            paper: '-',
-            dateStr: ymd,
-            duration: '-',
-            venue: '-',
-            desk: '-',
-            isBlock: true
-          });
+          // If it's a Saturday (6) or Sunday (0)
+          if (dayOfWeek === 0 || dayOfWeek === 6) {
+            blockDays.push({
+              subject: 'Weekend',
+              paper: '-',
+              dateStr: ymd,
+              duration: '-',
+              venue: '-',
+              desk: '-',
+              isBlock: true,
+              isWeekend: true
+            });
+          } else {
+            // Otherwise, it's a Block Day (weekday with no exam)
+            blockDays.push({
+              subject: 'Block Day',
+              paper: '-',
+              dateStr: ymd,
+              duration: '-',
+              venue: '-',
+              desk: '-',
+              isBlock: true,
+              isWeekend: false
+            });
+          }
         }
+        // Move to the next day
         current.setDate(current.getDate() + 1);
       }
 
+      // 3. Concatenate and let sortByDate handle the final chronological order
       return results.concat(blockDays);
     }
 
@@ -347,10 +385,23 @@
       return results.sort((a, b) => {
         const da = parseDateStr(a.dateStr);
         const db = parseDateStr(b.dateStr);
-        if (!da || !db) return 0;
-        return da - db;
+        
+        if (!da) return 1;
+        if (!db) return -1;
+        
+        // Primary sort: Date
+        const dateDiff = da.getTime() - db.getTime();
+        if (dateDiff !== 0) return dateDiff;
+        
+        // Secondary sort: Ensure Block/Weekend days are not mixed with exams if their time parsing fails.
+        // Since we only add block days on non-exam days, this simple date sort works perfectly.
+        return 0;
       });
     }
+
+    /* ************************************
+     * END: FIX Block Day and Weekend Logic
+     * ************************************/
 
     const runButton = document.getElementById('run');
     const statusEl = document.getElementById('status');
@@ -418,7 +469,7 @@
 
         let finalResults = enrichResultsWithTimetable(uniqueResults);
         finalResults = addManualExams(finalResults);
-        finalResults = addBlockDays(finalResults);
+        finalResults = addBlockDays(finalResults); // This now includes Weekends
         finalResults = sortByDate(finalResults);
 
         statusEl.textContent = `Found ${finalResults.filter(r => !r.isBlock).length} exam(s) for "${q}".`;
@@ -471,13 +522,14 @@
         if (isPast) tr.classList.add('past-exam');
         if (isBlock) tr.classList.add('block-day');
 
+        // Note: The isBlock flag is true for both 'Block Day' and 'Weekend' entries
         tr.innerHTML = `
           <td class="px-4 py-3 whitespace-nowrap text-sm font-medium ${isBlock ? 'text-gray-500' : 'text-gray-800'}">${r.subject}</td>
-          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${r.paper || '–'}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${isBlock ? '–' : (r.paper || '–')}</td>
           <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${r.dateStr}</td>
-          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${r.duration || 'N/A'}</td>
-          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${r.venue}</td>
-          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${r.desk}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${isBlock ? '–' : (r.duration || 'N/A')}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${isBlock ? '–' : r.venue}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">${isBlock ? '–' : r.desk}</td>
         `;
         tbody.appendChild(tr);
       }
