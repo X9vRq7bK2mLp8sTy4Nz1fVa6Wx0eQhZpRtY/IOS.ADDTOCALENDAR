@@ -49,6 +49,7 @@
     // --- CONFIGURATION ---
     const fileBasePath = '/resources/';
     const timetableFile = 'timetable.xlsx';
+    // Updated file names without spaces
     const scheduleFiles = [
       'Acc.xlsx',
       'Afr-Drama.xlsx',
@@ -74,19 +75,19 @@
       'cat': 'cat',
       'life sciences': 'life sciences',
       'physical science': 'physical sc',
-      'physical sc': 'physical sc',
+      'physical sc': 'physical sc', // Handle variations
       'business studies': 'business studies',
       'accounting': 'accounting',
       'history': 'history',
       'lo': 'life orientation',
       'design': 'design',
       'drama': 'dramatic arts',
-      'dramatic arts': 'dramatic arts',
+      'dramatic arts': 'dramatic arts', // Handle variations
       'music': 'music',
       'visual arts': 'visual arts',
       'egd': 'egd',
       'isixhosa': 'isixhosa hl',
-      'isixhosa hl': 'isixhosa hl'
+      'isixhosa hl': 'isixhosa hl' // Handle variations
     };
 
     function normalizeSubject(subject) {
@@ -96,10 +97,11 @@
         .replace(/isixhosa/i, 'isiXhosa')
         .trim();
       
-      // Handle "Physical Sc"
-      if (norm.startsWith('physical sc')) {
-          return 'physical sc';
-      }
+      if (norm.startsWith('physical sc')) return 'physical sc';
+      if (norm.startsWith('afri eat')) return 'afrikaans fal';
+      if (norm.startsWith('afri hl')) return 'afrikaans hl';
+      if (norm.startsWith('eng hl')) return 'english hl';
+      if (norm.startsWith('eng fal')) return 'english fal';
       
       return subjectNormalizationMap[norm] || norm;
     }
@@ -131,7 +133,8 @@
         if (data.length < 2) continue;
 
         let gr10ColIndex = -1;
-        const possibleHeaders = [data[0], data[1]]; // Check first two rows
+        // Check first two rows for header
+        const possibleHeaders = [data[0], data[1]]; 
 
         for (const headerRow of possibleHeaders) {
           if (headerRow) {
@@ -147,10 +150,11 @@
         
         if (gr10ColIndex === -1) {
           console.warn(`Could not find 'Gr 10' column in timetable sheet '${sheetName}'.`);
-          continue; // Skip sheet if no Gr 10 column
+          continue; 
         }
 
-        for (let r = 2; r < data.length; r++) {
+        // Start from row 2 (index 2), assuming headers are row 0 or 1
+        for (let r = 2; r < data.length; r++) { 
           const row = data[r];
           if (!row || !row[gr10ColIndex]) continue;
           
@@ -190,7 +194,6 @@
                   endTime: currentEndTime
                 });
               }
-              // Reset for next potential exam in cell
               currentSubject = ''; currentPaper = ''; currentDuration = ''; currentStartTime = ''; currentEndTime = '';
             }
           }
@@ -200,7 +203,7 @@
     }
 
 
-    // --- SCHEDULE PARSING (FIXED) ---
+    // --- SCHEDULE PARSING (NEW, FIXED LOGIC) ---
     function parseSchedule(wb, candidates) {
       const results = [];
 
@@ -210,12 +213,35 @@
         
         if (data.length < 2) continue;
 
-        // *** FIX 1: The header is data[0]. The subject is data[0][0]. That's it. ***
-        // We no longer look at data[1] for the subject, as this was the source of the contamination.
-        const header = data[0].map(h => h.toString().trim());
-        let subject = (header[0] || '').replace(/GR\s*10/i, '').trim() || sheetName;
+        // --- FIX for Subject Contamination ---
+        // Find the *real* header row. It's the first row that contains "Venue" or "Desk".
+        let headerRowIndex = 0;
+        let header = data[headerRowIndex].map(h => h.toString().trim());
+        
+        if (!header.some(h => h.match(/venue/i)) && data.length > 1) {
+            let header2 = data[1].map(h => h.toString().trim());
+            if (header2.some(h => h.match(/venue/i))) {
+                headerRowIndex = 1;
+                header = header2;
+            }
+        }
 
-        // Find columns
+        let subject = (header[0] || '').replace(/GR\s*10/i, '').trim() || sheetName;
+        // Handle multi-line subjects in the header cell
+        const rawSubjectCell = data[headerRowIndex][0] ? data[headerRowIndex][0].toString() : '';
+        if (rawSubjectCell.includes('\n')) {
+             subject = rawSubjectCell.split('\n').join(' ').replace(/GR\s*10/i, '').trim();
+        }
+        
+        // Handle subjects that are *above* the main header (like in Acc.xlsx)
+        if (headerRowIndex > 0) {
+            let potentialSubject = data[0][0].toString().trim();
+            if (potentialSubject && !potentialSubject.match(/venue/i) && potentialSubject.length > 5) {
+                 subject = potentialSubject.replace(/GR\s*10/i, '').trim();
+            }
+        }
+        // --- END Subject Fix ---
+        
         const venueCols = [];
         header.forEach((h, i) => { if (h.match(/venue/i)) venueCols.push(i); });
 
@@ -233,28 +259,21 @@
         });
 
         let currentValues = new Array(header.length).fill('');
-
-        // Start loop from r = 1 (row *after* the header)
-        for (let r = 1; r < data.length; r++) {
+        
+        // Start looping *after* the header row
+        for (let r = headerRowIndex + 1; r < data.length; r++) {
           const row = data[r].map(cell => cell.toString().trim());
 
-          // Skip if both name columns are empty
+          // FIX: Skip only if BOTH potential name columns are empty
           if (!row[0] && !row[1]) continue;
-          
-          // Check for repeated header rows and reset subject if found
-          if (row[0].toLowerCase().includes('gr 10') && row.some(h => h.toLowerCase().includes('venue'))) {
-              subject = (row[0] || '').replace(/GR\s*10/i, '').trim() || sheetName;
-              // Reset fill-down values
-              currentValues = new Array(header.length).fill('');
-              continue; // This row is a header, not a student
-          }
 
           // Apply fill-down logic
           for (let c = 0; c < row.length; c++) {
             if (row[c] !== '') currentValues[c] = row[c];
           }
 
-          // Check for name match in *current row's* col 0 and col 1
+          // FIX: Check BOTH name columns
+          // We check the *current row* for the name, not the fill-down.
           const nameCell1 = (row[0] || '').toLowerCase().replace(/[,\.]/g, '').replace(/\s+/g, ' ').trim();
           const nameCell2 = (row[1] || '').toLowerCase().replace(/[,\.]/g, '').replace(/\s+/g, ' ').trim();
 
@@ -268,48 +287,43 @@
 
           if (!matched) continue; // Not the student we're looking for
 
-          // --- Student matched. Now find their exams. ---
+          // --- Student matched. ---
+          // FIX: Revert to the SIMPLE logic: Add all papers from the header.
+          // This fixes the "insanely inaccurate" bug.
           for (const dateInfo of dateCols) {
-            const dc = dateInfo.col; // The date's column index
+            const dc = dateInfo.col;
             
             // Find the *last* "Venue" and "Desk" columns *before* this date column
             const vCol = venueCols.filter(v => v < dc).pop();
             const dCol = deskCols.filter(d => d < dc).pop();
 
-            const venue = (vCol !== undefined ? currentValues[vCol] : '') || 'N/A';
-            const desk = (dCol !== undefined ? currentValues[dCol] : '') || 'N/A';
+            // Use the FILL-DOWN values for venue and desk
+            let venue = (vCol !== undefined ? currentValues[vCol] : '') || 'N/A';
+            let desk = (dCol !== undefined ? currentValues[dCol] : '') || 'N/A';
             
-            // *** FIX 2: Check for data in the *fill-down* value for this date column ***
-            // This ensures we catch ticks ("X") from group rows.
-            const hasDataForPaper = currentValues[dc] !== '';
-
-            // *** FIX 3: If no tick, check if a venue/desk was *specifically* assigned ***
-            // This handles sheets where there's no "tick" but just a venue/desk.
-            // We check if the venue/desk *value* is not empty and not 'N/A'.
-            const hasVenueDesk = (venue && venue !== 'N/A') || (desk && desk !== 'N/A');
-
-            // *** Only add if the student has a tick OR a venue/desk for this paper ***
-            // This stops adding blank exams.
-            if (hasDataForPaper || (dateCols.length === 1 && hasVenueDesk)) {
-              results.push({
-                subject, // Subject is no longer contaminated
-                paper: dateInfo.paper,
-                dateStr: dateInfo.dateStr,
-                venue,
-                desk,
-                sheet: sheetName
-              });
-            } else if (!hasDataForPaper && dateCols.length > 1 && row[dc] !== '') {
-               // Fallback for multi-paper sheets where the 'tick' is on the student row
-                results.push({
-                    subject,
-                    paper: dateInfo.paper,
-                    dateStr: dateInfo.dateStr,
-                    venue,
-                    desk,
-                    sheet: sheetName
-                });
+            // Handle layouts like "GR 10 CAT",Venue,"P1",Venue,Desk,"P2"
+            // If venue/desk is blank, check for one *after* this paper column
+            if (venue === 'N/A' || venue === '') {
+                const vColAfter = venueCols.filter(v => v > dc && v < (dateInfo.col + 3)).shift(); 
+                if (vColAfter !== undefined) {
+                    venue = currentValues[vColAfter] || 'N/A';
+                }
             }
+            if (desk === 'N/A' || desk === '') {
+                const dColAfter = deskCols.filter(d => d > dc && d < (dateInfo.col + 3)).shift();
+                if (dColAfter !== undefined) {
+                    desk = currentValues[dColAfter] || 'N/A';
+                }
+            }
+
+            results.push({
+              subject, // Subject is now clean
+              paper: dateInfo.paper,
+              dateStr: dateInfo.dateStr,
+              venue: venue,
+              desk: desk,
+              sheet: sheetName
+            });
           }
         }
       }
@@ -420,7 +434,8 @@
         const uniqueResults = [];
         const seen = new Set();
         for (const r of allResults) {
-            const key = `${r.subject}-${r.paper}-${r.dateStr}`;
+            // A more unique key
+            const key = `${r.subject}-${r.paper}-${r.dateStr}-${r.venue}-${r.desk}`;
             if (!seen.has(key)) {
                 uniqueResults.push(r);
                 seen.add(key);
@@ -505,7 +520,7 @@
     }
 
 
-    // --- CALENDAR .ICS GENERATION ---
+    // --- CALENDAR .ICS GENERATION (FIXED & FULL-FEATURED) ---
     function getYYYYMMDD(dateObj) {
       const yyyy = dateObj.getFullYear();
       const mm = (dateObj.getMonth() + 1).toString().padStart(2, '0');
@@ -517,8 +532,8 @@
       const events = [];
       const monthMap = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
       
-      const currentYear = new Date().getFullYear();
-      const currentMonth = new Date().getMonth();
+      // Use 2025 as the year, based on timetable filename
+      const year = 2025; 
 
       const vTimezone = [
         'BEGIN:VTIMEZONE',
@@ -544,8 +559,6 @@
             continue;
           }
           
-          const year = (month < currentMonth) ? currentYear + 1 : currentYear;
-
           const dateObj = new Date(year, month, day);
           const ymd = getYYYYMMDD(dateObj);
           
@@ -555,7 +568,7 @@
           const paperStr = r.paper ? `${r.paper} ` : '';
           const baseUid = `${r.subject.replace(/\s+/g, '')}-${r.paper || 'main'}-${ymd}@exam-schedule.com`;
           
-          // Event 1: The Exam Paper (Timed Event)
+          // --- Event 1: The Exam Paper (Timed Event) ---
           const title = `${r.subject.replace(/\n/g, ' ')} ${paperStr}(${r.duration || 'N/A'})`;
           const desc = `Venue: ${r.venue}\\nDesk: ${r.desk}`.replace(/,/g, '\\,');
           const location = r.venue.replace(/,/g, '\\,');
@@ -571,7 +584,7 @@
             'END:VEVENT'
           ].join('\n'));
           
-          // Event 2: Venue/Desk Reminder (All-day Event)
+          // --- Event 2: Venue/Desk Reminder (All-day Event) ---
           const venueTitle = `Venue: ${r.venue}, Desk: ${r.desk}`;
           const venueDesc = `For ${r.subject.replace(/\n/g, ' ')} ${paperStr}Exam`;
           
