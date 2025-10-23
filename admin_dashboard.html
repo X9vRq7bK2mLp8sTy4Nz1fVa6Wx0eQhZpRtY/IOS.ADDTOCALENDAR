@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Log Viewer</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Supabase Client Library -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial,-serif; }
@@ -33,6 +34,7 @@
   <div class="max-w-7xl mx-auto bg-white p-6 md:p-8 rounded-lg shadow-xl">
     <h3 class="text-3xl font-bold text-gray-900 mb-6 border-b pb-2">Website Logs Dashboard</h3>
 
+    <!-- Tab Buttons -->
     <div class="flex space-x-2 mb-6">
         <button id="tab-searches" class="tab-button active px-4 py-2 text-sm font-medium rounded-lg text-blue-600 bg-blue-100 hover:bg-blue-200 transition-colors">
             Search Queries
@@ -42,16 +44,20 @@
         </button>
     </div>
 
+    <!-- Loading Status -->
     <div id="status" class="text-gray-600 text-sm mt-4 flex items-center gap-2 mb-4">
         <div class="spinner"></div> Loading data...
     </div>
 
+    <!-- Table Container -->
     <div class="table-container overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50" id="log-thead">
-          </thead>
+          <!-- Table headers will be injected here by JavaScript -->
+        </thead>
         <tbody class="bg-white divide-y divide-gray-200" id="log-data">
-          </tbody>
+          <!-- Log rows will be injected here by JavaScript -->
+        </tbody>
       </table>
     </div>
 
@@ -59,6 +65,8 @@
 
   <script>
     // --- SUPABASE CONFIGURATION (Using the Anon Key for Simplicity) ---
+    // Please verify the Supabase URL and Key are correct if this dashboard loads forever.
+    // The key MUST have SELECT permissions on search_logs and visitor_logs.
     const SUPABASE_URL = 'https://iwngyeebizqaazyulcpt.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3bmd5ZWViaXpxYWF6eXVsY3B0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1NTExOTIsImV4cCI6MjA3NjEyNzE5Mn0.tO8ky9PKHn90-gPkFeNFOkE9xmT6ki_hayRVzhkpWGg';
     const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -78,6 +86,7 @@
         if (!timestamp) return 'N/A';
         // The timestamp is UTC from Supabase, so we use toLocaleString to format
         const date = new Date(timestamp);
+        // Using Africa/Johannesburg (SAST)
         return date.toLocaleString('en-ZA', {
             year: 'numeric',
             month: '2-digit',
@@ -86,7 +95,7 @@
             minute: '2-digit',
             second: '2-digit',
             timeZoneName: 'short',
-            timeZone: 'Africa/Johannesburg' // SAST timezone
+            timeZone: 'Africa/Johannesburg' 
         });
     }
 
@@ -102,8 +111,10 @@
             .limit(100); // Limit to the last 100 entries
 
         if (error) {
-            statusEl.textContent = `Error loading logs from ${tableName}: ${error.message}`;
+            statusEl.textContent = `Error loading logs from ${tableName}. Check network connection and Supabase policies/key.`;
             logDataEl.innerHTML = '';
+            // Critical: Log the detailed error to the console for debugging
+            console.error(`Supabase Fetch Error for ${tableName}:`, error);
             return [];
         }
 
@@ -189,3 +200,4 @@
   </script>
 </body>
 </html>
+
