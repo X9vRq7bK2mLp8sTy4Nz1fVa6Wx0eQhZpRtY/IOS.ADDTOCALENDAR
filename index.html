@@ -3,15 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- New title -->
   <title>Exams</title>
-  <!-- Load Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body {
       font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
     }
-    /* Simple spinner for loading state */
     .spinner {
       border: 4px solid rgba(0, 0, 0, .1);
       border-left-color: #09f;
@@ -28,45 +25,30 @@
 <body class="bg-gray-100 text-gray-800 p-4 md:p-8">
 
   <div class="max-w-4xl mx-auto bg-white p-6 md:p-8 rounded-lg shadow-md">
-    <!-- New header -->
     <h3 class="text-2xl font-bold text-gray-900 mb-2">Exam Schedules</h3>
     <div class="text-gray-600 text-sm mb-6">
       Enter a student’s name to find all their subjects, dates, venues, and desks.
     </div>
 
-    <!-- File input is REMOVED -->
-
-    <!-- Name Search -->
     <label for="query" class="block text-sm font-medium text-gray-700 mt-4 mb-2">Search name</label>
     <input id="query" type="text" placeholder="e.g. Wessels, Joshua or Joshua Wessels"
            class="block w-full max-w-lg border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm p-2.5">
 
-    <!-- Run Button -->
     <button id="run"
             class="mt-6 px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 flex items-center gap-2">
       Find Matches
     </button>
     
-    <!-- Status Message -->
     <div id="status" class="text-gray-600 text-sm mt-4 flex items-center gap-2"></div>
-
-    <!-- Results Area -->
     <div id="results" class="mt-6"></div>
   </div>
 
-  <!-- XLSX Library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   
   <script>
     // --- CONFIGURATION ---
-    
-    // Base path for your files on the server
     const fileBasePath = '/resources/';
-
-    // The main timetable file
     const timetableFile = 'timetable.xlsx';
-
-    // All the schedule/venue files to search through
     const scheduleFiles = [
       'Acc.xlsx',
       'Afr-Drama.xlsx',
@@ -74,17 +56,14 @@
       'LO.xlsx',
       'LS-VA.xlsx'
     ];
-
-    // Global map to store parsed timetable data
     const timetableMap = new Map();
     // --- END CONFIGURATION ---
 
 
     // --- SUBJECT NORMALIZATION ---
-    // Maps subjects from venue sheets to timetable sheets
     const subjectNormalizationMap = {
       'afri hl': 'afrikaans hl',
-      'afri eat': 'afrikaans fal', // Assuming EAT maps to FAL
+      'afri eat': 'afrikaans fal',
       'afri fal': 'afrikaans fal',
       'eng hl': 'english hl',
       'eng fal': 'english fal',
@@ -95,41 +74,38 @@
       'cat': 'cat',
       'life sciences': 'life sciences',
       'physical science': 'physical sc',
+      'physical sc': 'physical sc',
       'business studies': 'business studies',
       'accounting': 'accounting',
       'history': 'history',
       'lo': 'life orientation',
       'design': 'design',
       'drama': 'dramatic arts',
+      'dramatic arts': 'dramatic arts',
       'music': 'music',
       'visual arts': 'visual arts',
       'egd': 'egd',
-      'isixhosa': 'isixhosa hl' // Assuming HL, adjust if needed
+      'isixhosa': 'isixhosa hl',
+      'isixhosa hl': 'isixhosa hl'
     };
 
-    /**
-     * Normalizes a subject name for matching with the timetable.
-     * @param {string} subject - The raw subject name from the sheet.
-     * @returns {string} - The normalized name.
-     */
     function normalizeSubject(subject) {
       let norm = subject.toLowerCase()
         .replace(/gr\s*10/i, '')
         .replace(/\n/g, ' ')
-        .replace(/isixhosa/i, 'isiXhosa') // Fix capitalization for matching
+        .replace(/isixhosa/i, 'isiXhosa')
         .trim();
+      
+      // Handle "Physical Sc"
+      if (norm.startsWith('physical sc')) {
+          return 'physical sc';
+      }
       
       return subjectNormalizationMap[norm] || norm;
     }
 
 
     // --- NETWORKING ---
-
-    /**
-     * Fetches a file from the server with retries.
-     * @param {string} url - The URL of the .xlsx file to fetch.
-     * @returns {Promise<ArrayBuffer>} - A promise that resolves with the file's ArrayBuffer.
-     */
     async function fetchFile(url) {
       try {
         const response = await fetch(url);
@@ -145,14 +121,8 @@
 
 
     // --- TIMETABLE PARSING ---
-
-    /**
-     * Parses the fetched timetable workbook (all sheets) and populates the global timetableMap.
-     * @param {object} wb - The XLSX workbook object.
-     */
     function parseTimetable(wb) {
       timetableMap.clear();
-      const gradeColumn = 3; // 'Gr 10' is column D, index 3
 
       for (const sheetName of wb.SheetNames) {
         const sheet = wb.Sheets[sheetName];
@@ -161,38 +131,30 @@
         if (data.length < 2) continue;
 
         let gr10ColIndex = -1;
+        const possibleHeaders = [data[0], data[1]]; // Check first two rows
 
-        // Find the 'Gr 10' column index dynamically
-        const headerRow = data[1] || []; // Header is often row 2
-        for(let i = 0; i < headerRow.length; i++) {
-          if (headerRow[i].toString().trim().toLowerCase() === 'gr 10') {
-            gr10ColIndex = i;
-            break;
-          }
-        }
-
-        // Fallback if not found
-        if (gr10ColIndex === -1) {
-           // Try row 1 as well
-           const headerRowAlt = data[0] || [];
-           for(let i = 0; i < headerRowAlt.length; i++) {
-              if (headerRowAlt[i].toString().trim().toLowerCase() === 'gr 10') {
+        for (const headerRow of possibleHeaders) {
+          if (headerRow) {
+            for (let i = 0; i < headerRow.length; i++) {
+              if (headerRow[i].toString().trim().toLowerCase() === 'gr 10') {
                 gr10ColIndex = i;
                 break;
               }
-           }
+            }
+          }
+          if (gr10ColIndex !== -1) break;
         }
         
-        // If still not found, use default and log a warning
         if (gr10ColIndex === -1) {
-          gr10ColIndex = 3; // Default to index 3
-          console.warn(`Could not find 'Gr 10' column in timetable sheet '${sheetName}'. Defaulting to column ${gr10ColIndex}.`);
+          console.warn(`Could not find 'Gr 10' column in timetable sheet '${sheetName}'.`);
+          continue; // Skip sheet if no Gr 10 column
         }
 
-        for (let r = 2; r < data.length; r++) { // Start from row 3
+        for (let r = 2; r < data.length; r++) {
           const row = data[r];
-          const gr10Cell = (row[gr10ColIndex] || '').toString();
-
+          if (!row || !row[gr10ColIndex]) continue;
+          
+          const gr10Cell = row[gr10ColIndex].toString();
           if (!gr10Cell) continue;
 
           const exams = gr10Cell.split('\n');
@@ -202,30 +164,23 @@
             const trimmedLine = line.trim();
             if (!trimmedLine) continue;
 
-            // Check for Subject/Paper/Duration
-            // e.g., "English HL P3 (3 hrs)"
-            const examMatch = trimmedLine.match(/^(.*?)\s*(P\d)?\s*\((.*?hrs)\)$/i);
-            // e.g., "History (3 hrs)"
-            const simpleExamMatch = trimmedLine.match(/^(.*?)\s*\((.*?hrs)\)$/i);
-            
-            // Check for Time
-            // e.g., "09:00–12:00" or "09:30 - 12:00"
+            const examMatch = trimmedLine.match(/^(.*?)\s*(P\d)?\s*\((.*?hrs?)\)$/i);
+            const simpleExamMatch = trimmedLine.match(/^(.*?)\s*\((.*?hrs?)\)$/i);
             const timeMatch = trimmedLine.match(/(\d{2}):(\d{2})\s*[–-]\s*(\d{2}):(\d{2})/);
 
             if (examMatch) {
               currentSubject = examMatch[1].trim();
-              currentPaper = (examMatch[2] || 'P1').trim(); // Default to P1 if not specified
-              currentDuration = examMatch[3].trim();
-            } else if (simpleExamMatch && !timeMatch) { // Ensure it's not a time string
+              currentPaper = (examMatch[2] || 'P1').trim();
+              currentDuration = examMatch[3].trim().replace('hr', 'hrs');
+            } else if (simpleExamMatch && !timeMatch && !currentSubject) {
               currentSubject = simpleExamMatch[1].trim();
-              currentPaper = 'P1'; // Default to P1
-              currentDuration = simpleExamMatch[2].trim();
+              currentPaper = 'P1';
+              currentDuration = simpleExamMatch[2].trim().replace('hr', 'hrs');
             } else if (timeMatch) {
               currentStartTime = `${timeMatch[1]}${timeMatch[2]}`;
               currentEndTime = `${timeMatch[3]}${timeMatch[4]}`;
             }
 
-            // If we have all parts, save to map
             if (currentSubject && currentPaper && currentDuration && currentStartTime) {
               const key = `${currentSubject.toLowerCase()} ${currentPaper.toLowerCase()}`;
               if (!timetableMap.has(key)) {
@@ -245,14 +200,7 @@
     }
 
 
-    // --- SCHEDULE PARSING ---
-
-    /**
-     * Parses a single schedule workbook to find matches for the given student.
-     * @param {object} wb - The XLSX workbook object.
-     * @param {Array<string>} candidates - The list of name candidates to search for.
-     * @returns {Array<object>} - An array of result objects.
-     */
+    // --- SCHEDULE PARSING (FIXED) ---
     function parseSchedule(wb, candidates) {
       const results = [];
 
@@ -262,14 +210,12 @@
         
         if (data.length < 2) continue;
 
+        // *** FIX 1: The header is data[0]. The subject is data[0][0]. That's it. ***
+        // We no longer look at data[1] for the subject, as this was the source of the contamination.
         const header = data[0].map(h => h.toString().trim());
+        let subject = (header[0] || '').replace(/GR\s*10/i, '').trim() || sheetName;
 
-        let subject = header[0].replace(/GR\s*10/i, '').trim() || sheetName;
-        // Handle cases where subject is split over rows
-        if (data[1] && data[1][0] && header[0].toLowerCase().includes('gr 10') && !data[1][0].toLowerCase().includes('venue')) {
-            subject = data[1][0].toString().trim().replace(/GR\s*10/i, '').trim();
-        }
-        
+        // Find columns
         const venueCols = [];
         header.forEach((h, i) => { if (h.match(/venue/i)) venueCols.push(i); });
 
@@ -288,15 +234,27 @@
 
         let currentValues = new Array(header.length).fill('');
 
+        // Start loop from r = 1 (row *after* the header)
         for (let r = 1; r < data.length; r++) {
           const row = data[r].map(cell => cell.toString().trim());
 
+          // Skip if both name columns are empty
           if (!row[0] && !row[1]) continue;
+          
+          // Check for repeated header rows and reset subject if found
+          if (row[0].toLowerCase().includes('gr 10') && row.some(h => h.toLowerCase().includes('venue'))) {
+              subject = (row[0] || '').replace(/GR\s*10/i, '').trim() || sheetName;
+              // Reset fill-down values
+              currentValues = new Array(header.length).fill('');
+              continue; // This row is a header, not a student
+          }
 
+          // Apply fill-down logic
           for (let c = 0; c < row.length; c++) {
             if (row[c] !== '') currentValues[c] = row[c];
           }
 
+          // Check for name match in *current row's* col 0 and col 1
           const nameCell1 = (row[0] || '').toLowerCase().replace(/[,\.]/g, '').replace(/\s+/g, ' ').trim();
           const nameCell2 = (row[1] || '').toLowerCase().replace(/[,\.]/g, '').replace(/\s+/g, ' ').trim();
 
@@ -308,29 +266,49 @@
             }
           }
 
-          if (!matched) continue;
+          if (!matched) continue; // Not the student we're looking for
 
+          // --- Student matched. Now find their exams. ---
           for (const dateInfo of dateCols) {
-            const dc = dateInfo.col;
+            const dc = dateInfo.col; // The date's column index
+            
+            // Find the *last* "Venue" and "Desk" columns *before* this date column
             const vCol = venueCols.filter(v => v < dc).pop();
             const dCol = deskCols.filter(d => d < dc).pop();
 
             const venue = (vCol !== undefined ? currentValues[vCol] : '') || 'N/A';
             const desk = (dCol !== undefined ? currentValues[dCol] : '') || 'N/A';
             
-            // Only add if there's *some* data for this paper (a tick, a date, anything)
-            // Or if the venue/desk columns are *after* the name but *before* the date
-            const hasDataForPaper = row[dc] || (vCol !== undefined && dCol !== undefined);
+            // *** FIX 2: Check for data in the *fill-down* value for this date column ***
+            // This ensures we catch ticks ("X") from group rows.
+            const hasDataForPaper = currentValues[dc] !== '';
 
-            if (hasDataForPaper) {
+            // *** FIX 3: If no tick, check if a venue/desk was *specifically* assigned ***
+            // This handles sheets where there's no "tick" but just a venue/desk.
+            // We check if the venue/desk *value* is not empty and not 'N/A'.
+            const hasVenueDesk = (venue && venue !== 'N/A') || (desk && desk !== 'N/A');
+
+            // *** Only add if the student has a tick OR a venue/desk for this paper ***
+            // This stops adding blank exams.
+            if (hasDataForPaper || (dateCols.length === 1 && hasVenueDesk)) {
               results.push({
-                subject,
+                subject, // Subject is no longer contaminated
                 paper: dateInfo.paper,
                 dateStr: dateInfo.dateStr,
                 venue,
                 desk,
                 sheet: sheetName
               });
+            } else if (!hasDataForPaper && dateCols.length > 1 && row[dc] !== '') {
+               // Fallback for multi-paper sheets where the 'tick' is on the student row
+                results.push({
+                    subject,
+                    paper: dateInfo.paper,
+                    dateStr: dateInfo.dateStr,
+                    venue,
+                    desk,
+                    sheet: sheetName
+                });
             }
           }
         }
@@ -338,16 +316,16 @@
       return results;
     }
 
+
     /**
      * Fills in results with data from the timetableMap.
-     * @param {Array<object>} results - The array of found exam results.
      */
     function enrichResultsWithTimetable(results) {
       return results.map(r => {
         const normalizedSubject = normalizeSubject(r.subject);
         const paper = (r.paper || 'P1').toLowerCase(); // Default to P1
         const key = `${normalizedSubject} ${paper}`;
-
+        
         const ttEntry = timetableMap.get(key);
 
         if (ttEntry) {
@@ -356,9 +334,9 @@
           r.endTime = ttEntry.endTime;
         } else {
           // Fallback if not found
-          r.duration = '3 hrs'; // Default
+          r.duration = '2 hrs'; // Default
           r.startTime = '0900';
-          r.endTime = '1200';
+          r.endTime = '1100';
           console.warn(`No timetable entry found for key: "${key}" (Raw Subject: "${r.subject}", Paper: "${r.paper}")`);
         }
         return r;
@@ -367,14 +345,10 @@
 
     
     // --- UI & EVENT HANDLERS ---
-
     const runButton = document.getElementById('run');
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
 
-    /**
-     * Main function triggered on button click.
-     */
     runButton.onclick = async () => {
       const q = (document.getElementById('query').value || '').trim();
       
@@ -388,14 +362,13 @@
         return;
       }
 
-      // Add spinner to status
       const spinner = document.createElement('div');
       spinner.className = 'spinner';
       statusEl.appendChild(spinner);
       statusEl.appendChild(document.createTextNode(' Initializing...'));
 
       try {
-        // --- 1. Generate Name Candidates ---
+        // 1. Generate Name Candidates
         const qNorm = q.toLowerCase().replace(/[,\.]/g, '').replace(/\s+/g, ' ').trim();
         const parts = qNorm.split(' ');
         let candidates = [];
@@ -408,7 +381,7 @@
         }
         candidates = Array.from(new Set(candidates));
 
-        // --- 2. Fetch and Parse Timetable ---
+        // 2. Fetch and Parse Timetable
         if (timetableMap.size === 0) {
           statusEl.textContent = '';
           statusEl.appendChild(spinner);
@@ -419,7 +392,7 @@
           parseTimetable(ttWb);
         }
 
-        // --- 3. Fetch and Parse Schedules ---
+        // 3. Fetch and Parse Schedules
         statusEl.textContent = '';
         statusEl.appendChild(spinner);
         statusEl.appendChild(document.createTextNode(' Searching schedules... (0/' + scheduleFiles.length + ')'));
@@ -439,16 +412,27 @@
           } catch (fileError) {
             console.error(`Failed to load or parse ${fileName}:`, fileError);
             statusEl.textContent = `Error: Could not load ${fileName}. Skipping.`;
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
         }
+        
+        // 3.5 Remove duplicate results
+        const uniqueResults = [];
+        const seen = new Set();
+        for (const r of allResults) {
+            const key = `${r.subject}-${r.paper}-${r.dateStr}`;
+            if (!seen.has(key)) {
+                uniqueResults.push(r);
+                seen.add(key);
+            }
+        }
 
-        // --- 4. Process and Display Results ---
+        // 4. Process and Display Results
         statusEl.textContent = '';
         statusEl.appendChild(spinner);
         statusEl.appendChild(document.createTextNode(' Processing results...'));
 
-        const finalResults = enrichResultsWithTimetable(allResults);
+        const finalResults = enrichResultsWithTimetable(uniqueResults);
 
         statusEl.textContent = `Found ${finalResults.length} match(es) for "${q}".`;
 
@@ -465,7 +449,6 @@
         statusEl.textContent = `An error occurred: ${error.message}`;
       } finally {
         runButton.disabled = false;
-        // Remove spinner if it exists
         const spinnerEl = statusEl.querySelector('.spinner');
         if (spinnerEl) {
           statusEl.removeChild(spinnerEl);
@@ -475,7 +458,6 @@
 
     /**
      * Renders the results table and "Add to Calendar" button.
-     * @param {Array<object>} results - The final array of enriched results.
      */
     function displayResultsTable(results) {
       const table = document.createElement('table');
@@ -524,12 +506,6 @@
 
 
     // --- CALENDAR .ICS GENERATION ---
-
-    /**
-     * Helper to format a date object as YYYYMMDD.
-     * @param {Date} dateObj - The date to format.
-     * @returns {string} - Formatted string "YYYYMMDD".
-     */
     function getYYYYMMDD(dateObj) {
       const yyyy = dateObj.getFullYear();
       const mm = (dateObj.getMonth() + 1).toString().padStart(2, '0');
@@ -537,10 +513,6 @@
       return `${yyyy}${mm}${dd}`;
     }
 
-    /**
-     * Generates and triggers download of the .ics file.
-     * @param {Array<object>} results - The enriched results array.
-     */
     function generateICS(results) {
       const events = [];
       const monthMap = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
@@ -548,7 +520,6 @@
       const currentYear = new Date().getFullYear();
       const currentMonth = new Date().getMonth();
 
-      // VTIMEZONE definition for SAST (UTC+2)
       const vTimezone = [
         'BEGIN:VTIMEZONE',
         'TZID:Africa/Johannesburg',
@@ -575,7 +546,6 @@
           
           const year = (month < currentMonth) ? currentYear + 1 : currentYear;
 
-          // *** DATE FIX: Use local values, not UTC/toISOString ***
           const dateObj = new Date(year, month, day);
           const ymd = getYYYYMMDD(dateObj);
           
@@ -585,7 +555,7 @@
           const paperStr = r.paper ? `${r.paper} ` : '';
           const baseUid = `${r.subject.replace(/\s+/g, '')}-${r.paper || 'main'}-${ymd}@exam-schedule.com`;
           
-          // --- Event 1: The Exam Paper (Timed Event) ---
+          // Event 1: The Exam Paper (Timed Event)
           const title = `${r.subject.replace(/\n/g, ' ')} ${paperStr}(${r.duration || 'N/A'})`;
           const desc = `Venue: ${r.venue}\\nDesk: ${r.desk}`.replace(/,/g, '\\,');
           const location = r.venue.replace(/,/g, '\\,');
@@ -601,15 +571,15 @@
             'END:VEVENT'
           ].join('\n'));
           
-          // --- Event 2: Venue/Desk Reminder (All-day Event) ---
+          // Event 2: Venue/Desk Reminder (All-day Event)
           const venueTitle = `Venue: ${r.venue}, Desk: ${r.desk}`;
           const venueDesc = `For ${r.subject.replace(/\n/g, ' ')} ${paperStr}Exam`;
           
           events.push([
             'BEGIN:VEVENT',
             `UID:${baseUid}-venue`,
-            `DTSTART;VALUE=DATE:${ymd}`, // All-day event start
-            `DTEND;VALUE=DATE:${ymdEnd}`,   // All-day event end (next day)
+            `DTSTART;VALUE=DATE:${ymd}`,
+            `DTEND;VALUE=DATE:${ymdEnd}`,
             `SUMMARY:${venueTitle}`,
             `DESCRIPTION:${venueDesc}`,
             `LOCATION:${location}`,
@@ -622,12 +592,12 @@
       }
 
       const ics = [
-        'BEGIN:VCALENDAR',
+        'BEGIN:CALENDAR',
         'VERSION:2.0',
         'PRODID:-//YourApp//ExamScheduler//EN',
-        vTimezone, // Add the timezone definition
+        vTimezone,
         ...events,
-        'END:VCALENDAR'
+        'END:CALENDAR'
       ].join('\n');
 
       const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
@@ -645,3 +615,5 @@
   </script>
 </body>
 </html>
+
+
