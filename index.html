@@ -132,13 +132,22 @@
      */
     async function fetchFile(url) {
       try {
+        console.log(`Fetching file: ${url}`); // Log the exact URL being fetched
         const response = await fetch(url);
         if (!response.ok) {
-          throw new Error(`Network error: ${response.statusText} for file ${url}`);
+          // Try to read the response body for more details if it's text (e.g., error message from server)
+          let errorDetails = '';
+          try {
+            const text = await response.text();
+            errorDetails = ` (Response body: ${text.substring(0, 200)}...)`; // Truncate long bodies
+          } catch (bodyError) {
+            // Ignore if can't read body
+          }
+          throw new Error(`Network error ${response.status}: ${response.statusText} for file ${url}${errorDetails}`);
         }
         return await response.arrayBuffer();
       } catch (error) {
-        console.error(error);
+        console.error(`Fetch error details:`, error);
         throw error;
       }
     }
@@ -414,9 +423,21 @@
           statusEl.appendChild(spinner);
           statusEl.appendChild(document.createTextNode(' Loading timetable...'));
           
-          const ttAb = await fetchFile(fileBasePath + timetableFile);
-          const ttWb = XLSX.read(ttAb, { type: 'array' });
-          parseTimetable(ttWb);
+          try {
+            const ttAb = await fetchFile(fileBasePath + timetableFile);
+            const ttWb = XLSX.read(ttAb, { type: 'array' });
+            parseTimetable(ttWb);
+          } catch (ttError) {
+            console.error(`Failed to load or parse timetable:`, ttError);
+            statusEl.textContent = `Error loading timetable: ${ttError.message}. Cannot proceed without timetable data.`;
+            runButton.disabled = false;
+            // Remove spinner
+            const spinnerEl = statusEl.querySelector('.spinner');
+            if (spinnerEl) {
+              statusEl.removeChild(spinnerEl);
+            }
+            return; // Stop execution if timetable fails
+          }
         }
 
         // --- 3. Fetch and Parse Schedules ---
@@ -438,7 +459,7 @@
             allResults = allResults.concat(fileResults);
           } catch (fileError) {
             console.error(`Failed to load or parse ${fileName}:`, fileError);
-            statusEl.textContent = `Error: Could not load ${fileName}. Skipping.`;
+            statusEl.textContent = `Error: Could not load ${fileName}: ${fileError.message}. Skipping.`;
             await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
           }
         }
@@ -645,4 +666,3 @@
   </script>
 </body>
 </html>
-
