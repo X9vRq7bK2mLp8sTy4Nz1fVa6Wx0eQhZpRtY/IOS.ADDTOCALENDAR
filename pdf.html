@@ -1,0 +1,204 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Exam Schedule Finder & Calendar Adder</title>
+<style>
+  :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; color:#111}
+  body{margin:20px;line-height:1.4}
+  label,input,button{display:block;margin:8px 0}
+  input[type="text"]{padding:8px;width:100%;max-width:540px}
+  button{padding:8px 12px}
+  table{border-collapse:collapse;margin-top:12px;width:100%;max-width:900px}
+  th,td{border:1px solid #ddd;padding:6px;text-align:left;font-size:13px}
+  .muted{color:#666;font-size:13px}
+  #results{margin-top:12px}
+</style>
+</head>
+<body>
+  <h3>Exam Schedule Finder & Calendar Adder</h3>
+  <div class="muted">Upload the Excel schedule file and enter a student’s name (last, first or first last). It will find all subjects, dates, venues, desks, and allow adding them as calendar events.</div>
+
+  <label>Excel file
+    <input id="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+  </label>
+
+  <label>Search name (e.g. Wessels, Joshua or Joshua Wessels)
+    <input id="query" type="text" placeholder="last, first or first last">
+  </label>
+
+  <button id="run">Find Matches</button>
+  <div id="status" class="muted"></div>
+
+  <div id="results"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script>
+  document.getElementById('run').onclick = async () => {
+    const fileEl = document.getElementById('file');
+    const q = (document.getElementById('query').value || '').trim();
+    document.getElementById('status').textContent = '';
+    document.getElementById('results').innerHTML = '';
+
+    if(!fileEl.files || !fileEl.files[0]) { document.getElementById('status').textContent = 'Select an Excel file first'; return; }
+    if(!q) { document.getElementById('status').textContent = 'Enter a name to search'; return; }
+
+    const allowed = fileEl.files[0].name.toLowerCase().endsWith('.xlsx');
+    if(!allowed){ document.getElementById('status').textContent = 'That does not look like an Excel file'; return; }
+
+    document.getElementById('status').textContent = 'Reading Excel...';
+
+    const arrayBuffer = await fileEl.files[0].arrayBuffer();
+    const wb = XLSX.read(arrayBuffer, {type: 'array'});
+
+    document.getElementById('status').textContent = 'Parsing sheets...';
+
+    const qNorm = q.toLowerCase().replace(/[,\.]/g,'').replace(/\s+/g,' ').trim();
+    const parts = qNorm.split(' ');
+    let candidates = [];
+    if(parts.length >= 2){
+      const first = parts[0], last = parts.slice(1).join(' ');
+      candidates.push((last + ' ' + first).toLowerCase());
+      candidates.push((first + ' ' + last).toLowerCase());
+      candidates.push((last + ', ' + first).toLowerCase());
+      candidates.push((last + ',' + first).toLowerCase());
+    } else {
+      candidates.push(qNorm);
+    }
+    candidates = Array.from(new Set(candidates));
+
+    const results = [];
+    for(const sheetName of wb.SheetNames){
+      const sheet = wb.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(sheet, {header:1, blankrows: false, defval: ''});
+      if(data.length < 2) continue;
+
+      const header = data[0].map(h => h.toString().trim());
+
+      let subject = header[0].replace(/GR\s*10/i, '').trim() || sheetName;
+
+      const venueCols = [];
+      header.forEach((h, i) => { if(h.match(/venue/i)) venueCols.push(i); });
+
+      const deskCols = [];
+      header.forEach((h, i) => { if(h.match(/desk/i)) deskCols.push(i); });
+
+      const dateCols = [];
+      header.forEach((h, i) => {
+        const hStr = h.toString().trim();
+        if(hStr.match(/\d{1,2}[- \/](?:Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep)/i)){
+          let paper = hStr.match(/P(\d)/) ? 'P' + RegExp.$1 : '';
+          let dateStr = hStr.replace(/P\d/i, '').replace(/-/g, ' ').trim();
+          dateCols.push({col: i, paper, dateStr});
+        }
+      });
+
+      let currentValues = new Array(header.length).fill('');
+
+      for(let r = 1; r < data.length; r++){
+        const row = data[r].map(cell => cell.toString().trim());
+        if(!row[0]) continue;
+
+        const lowName = row[0].toLowerCase().replace(/[,\.]/g,'').replace(/\s+/g,' ').trim();
+        let matched = false;
+        for(const c of candidates){
+          if(lowName.includes(c)){ matched = true; break; }
+        }
+        if(!matched) continue;
+
+        // Fill down/current values
+        for(let c = 0; c < row.length; c++){
+          if(row[c] !== '') currentValues[c] = row[c];
+        }
+
+        // For each date/paper
+        for(const dateInfo of dateCols){
+          const dc = dateInfo.col;
+          const vCol = venueCols.filter(v => v < dc).pop();
+          const dCol = deskCols.filter(d => d < dc).pop();
+
+          const venue = (vCol !== undefined ? currentValues[vCol] : '') || 'N/A';
+          const desk = (dCol !== undefined ? currentValues[dCol] : '') || '';
+
+          results.push({
+            subject,
+            paper: dateInfo.paper,
+            dateStr: dateInfo.dateStr,
+            venue,
+            desk,
+            sheet: sheetName
+          });
+        }
+      }
+    }
+
+    document.getElementById('status').textContent = `Found ${results.length} match(es)`;
+
+    if(results.length === 0){
+      document.getElementById('results').innerHTML = '<div class="muted">No matches found.</div>';
+      return;
+    }
+
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>Subject</th><th>Paper</th><th>Date</th><th>Venue</th><th>Desk</th><th>Sheet</th></tr>';
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for(const r of results){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.subject}</td><td>${r.paper}</td><td>${r.dateStr}</td><td>${r.venue}</td><td>${r.desk}</td><td>${r.sheet}</td>`;
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    const container = document.getElementById('results');
+    container.innerHTML = '';
+    container.appendChild(table);
+
+    const addBtn = document.createElement('button');
+    addBtn.id = 'addCal';
+    addBtn.textContent = 'Add All to Calendar';
+    addBtn.style.marginTop = '12px';
+    container.appendChild(addBtn);
+
+    addBtn.onclick = () => {
+      const events = [];
+      const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+      for(const r of results){
+        const parts = r.dateStr.toLowerCase().split(/[\s\/]+/);
+        const day = parseInt(parts[0], 10);
+        const monStr = parts[1].slice(0,3);
+        const month = monthMap[monStr] || 11; // default Nov
+        const year = 2025;
+        const dateObj = new Date(year, month - 1, day);
+        const ymd = dateObj.toISOString().slice(0,10).replace(/-/g,'');
+
+        const paperStr = r.paper ? `${r.paper} ` : '';
+        const title = `${r.subject} ${paperStr}Exam`;
+        const desc = `Venue: ${r.venue}\nDesk: ${r.desk}`;
+
+        const uid = `${r.subject.replace(/\s+/g,'')}-${r.paper || 'single'}-${ymd}@example.com`;
+
+        events.push(`BEGIN:VEVENT
+UID:${uid}
+DTSTART;VALUE=DATE:${ymd}
+DTEND;VALUE=DATE:${new Date(dateObj.getTime() + 86400000).toISOString().slice(0,10).replace(/-/g,'')}
+SUMMARY:${title}
+DESCRIPTION:${desc}
+LOCATION:${r.venue}
+END:VEVENT`);
+      }
+
+      const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+${events.join('\n')}
+END:VCALENDAR`;
+
+      const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.location.href = url;
+    };
+  };
+  </script>
+</body>
+</html>
