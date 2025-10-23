@@ -75,24 +75,27 @@
       if(data.length < 2) continue;
 
       const header = data[0].map(h => h.toString().trim());
-
       let subject = header[0].replace(/GR\s*10/i, '').trim() || sheetName;
 
-      const venueCols = [];
-      header.forEach((h, i) => { if(h.match(/venue/i)) venueCols.push(i); });
+      const venueCols = header.reduce((acc, h, i) => {
+        if(h.match(/venue/i)) acc.push(i);
+        return acc;
+      }, []);
 
-      const deskCols = [];
-      header.forEach((h, i) => { if(h.match(/desk/i)) deskCols.push(i); });
+      const deskCols = header.reduce((acc, h, i) => {
+        if(h.match(/desk/i)) acc.push(i);
+        return acc;
+      }, []);
 
-      const dateCols = [];
-      header.forEach((h, i) => {
+      const dateCols = header.reduce((acc, h, i) => {
         const hStr = h.toString().trim();
         if(hStr.match(/\d{1,2}[- \/](?:Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep)/i)){
           let paper = hStr.match(/P(\d)/) ? 'P' + RegExp.$1 : '';
           let dateStr = hStr.replace(/P\d/i, '').replace(/-/g, ' ').trim();
-          dateCols.push({col: i, paper, dateStr});
+          acc.push({col: i, paper, dateStr});
         }
-      });
+        return acc;
+      }, []);
 
       let currentValues = new Array(header.length).fill('');
 
@@ -107,28 +110,40 @@
         }
         if(!matched) continue;
 
-        // Fill down/current values
         for(let c = 0; c < row.length; c++){
           if(row[c] !== '') currentValues[c] = row[c];
         }
 
-        // For each date/paper
         for(const dateInfo of dateCols){
           const dc = dateInfo.col;
-          const vCol = venueCols.filter(v => v < dc).pop();
-          const dCol = deskCols.filter(d => d < dc).pop();
+          let venue = 'N/A';
+          let desk = '';
 
-          const venue = (vCol !== undefined ? currentValues[vCol] : '') || 'N/A';
-          const desk = (dCol !== undefined ? currentValues[dCol] : '') || '';
+          // Find the most recent venue and desk before the date column
+          for(let vc of venueCols){
+            if(vc < dc && currentValues[vc]) {
+              venue = currentValues[vc];
+              break;
+            }
+          }
 
-          results.push({
-            subject,
-            paper: dateInfo.paper,
-            dateStr: dateInfo.dateStr,
-            venue,
-            desk,
-            sheet: sheetName
-          });
+          for(let dc of deskCols){
+            if(dc < dc && currentValues[dc]) {
+              desk = currentValues[dc];
+              break;
+            }
+          }
+
+          if(venue !== 'N/A' && desk) {
+            results.push({
+              subject,
+              paper: dateInfo.paper,
+              dateStr: dateInfo.dateStr,
+              venue,
+              desk,
+              sheet: sheetName
+            });
+          }
         }
       }
     }
@@ -174,7 +189,7 @@
         const ymd = dateObj.toISOString().slice(0,10).replace(/-/g,'');
 
         const paperStr = r.paper ? `${r.paper} ` : '';
-        const title = `${r.subject} ${paperStr}Exam`;
+        const title = `${r.subject} ${paperStr}Exam, Desk ${r.desk}`;
         const desc = `Venue: ${r.venue}\nDesk: ${r.desk}`;
 
         const uid = `${r.subject.replace(/\s+/g,'')}-${r.paper || 'single'}-${ymd}@example.com`;
