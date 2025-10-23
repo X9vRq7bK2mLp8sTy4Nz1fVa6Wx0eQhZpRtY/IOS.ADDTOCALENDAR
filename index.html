@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Add to Calendar</title>
+  </head>
+  <body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
+    <button id="add" style="font-size:18px;padding:10px 20px;">add to calendar</button>
+
+    <script>
+      document.getElementById('add').onclick = () => {
+        const start = new Date(Date.now() + 3600000).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        const end = new Date(Date.now() + 7200000).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        const randomId = Math.floor(Math.random() * 100000);
+        const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:${randomId}@example.com
+DTSTAMP:${start}
+DTSTART:${start}
+DTEND:${end}
+SUMMARY:Random Event ${randomId}
+DESCRIPTION:This is a random calendar event.
+END:VEVENT
+END:VCALENDAR`;
+
+        const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        window.location.href = url;
+      };
+    </script>
+  </body>
+</html>
