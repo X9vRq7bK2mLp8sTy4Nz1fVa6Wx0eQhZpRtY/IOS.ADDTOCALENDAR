@@ -1,0 +1,305 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>pdf seat finder</title>
+<style>
+  :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; color:#111}
+  body{margin:20px;line-height:1.4}
+  label,input,button{display:block;margin:8px 0}
+  input[type="text"]{padding:8px;width:100%;max-width:540px}
+  button{padding:8px 12px}
+  table{border-collapse:collapse;margin-top:12px;width:100%;max-width:900px}
+  th,td{border:1px solid #ddd;padding:6px;text-align:left;font-size:13px}
+  .muted{color:#666;font-size:13px}
+  #results{margin-top:12px}
+</style>
+</head>
+<body>
+  <h3>pdf seat finder</h3>
+  <div class="muted">upload the schedule pdf and enter a name (last, first or first last). looks for subject, venue, desk, date.</div>
+
+  <label>pdf file
+    <input id="file" type="file" accept="application/pdf">
+  </label>
+
+  <label>search name (e.g. wessels, joshua or joshua wessels)
+    <input id="query" type="text" placeholder="last, first or first last">
+  </label>
+
+  <button id="run">find matches</button>
+  <div id="status" class="muted"></div>
+
+  <div id="results"></div>
+
+  <script>
+  // pdf.js from CDN
+  (function loadPdfJs(cb){
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+    s.onload = cb;
+    s.onerror = cb;
+    document.head.appendChild(s);
+  })(init);
+
+  function init(){
+    if(!window.pdfjsLib){
+      document.getElementById('status').textContent = 'pdf.js failed to load. open in chrome/firefox or check network.';
+      return;
+    }
+    // set worker (cdn path)
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    document.getElementById('run').onclick = async () => {
+      const fileEl = document.getElementById('file');
+      const q = (document.getElementById('query').value || '').trim();
+      document.getElementById('status').textContent = '';
+      document.getElementById('results').innerHTML = '';
+
+      if(!fileEl.files || !fileEl.files[0]) { document.getElementById('status').textContent = 'select a pdf first'; return; }
+      if(!q) { document.getElementById('status').textContent = 'enter a name to search'; return; }
+
+      const allowed = fileEl.files[0].type === 'application/pdf' || fileEl.files[0].name.toLowerCase().endsWith('.pdf');
+      if(!allowed){ document.getElementById('status').textContent = 'that does not look like a pdf'; return; }
+
+      document.getElementById('status').textContent = 'reading pdf...';
+
+      const arrayBuffer = await fileEl.files[0].arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({data: arrayBuffer});
+      const pdf = await loadingTask.promise;
+      const pages = [];
+      for(let p=1;p<=pdf.numPages;p++){
+        try{
+          const page = await pdf.getPage(p);
+          const content = await page.getTextContent();
+          const strings = content.items.map(i => i.str);
+          const text = strings.join('\n');
+          pages.push({page: p, text});
+        }catch(e){
+          pages.push({page: p, text: ''});
+        }
+      }
+
+      document.getElementById('status').textContent = 'parsing text...';
+
+      // normalize search name forms
+      const qNorm = q.toLowerCase().replace(/[,\.]/g,'').replace(/\s+/g,' ').trim();
+      const parts = qNorm.split(' ');
+      let candidates = [];
+      if(parts.length >= 2){
+        const first = parts[0], last = parts[1];
+        // support both orders
+        candidates.push((last + ' ' + first).toLowerCase());
+        candidates.push((first + ' ' + last).toLowerCase());
+        candidates.push((last + ', ' + first).toLowerCase());
+        candidates.push((last + ',' + first).toLowerCase());
+      } else {
+        candidates.push(qNorm);
+      }
+      candidates = Array.from(new Set(candidates));
+
+      // helper regexes
+      const subjHeaderRe = /\b(GR(?:\.|)\s*10|GRADE\s*10|GR\s*10)\b[\s\-:]*([A-Za-z0-9 &\/]{2,40})?/i;
+      const dateRe = /(?:\b|T)(\d{1,2}[ \-\/\.](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|[A-Za-z]{3,9})\b(?:[ \-\/\.]\d{2,4})?|\b\d{1,2}[-\/\.]\d{1,2}[-\/\.]\d{2,4})/ig;
+      const venueRe = /\b(H\d{1,3}\b|Hall|HALL|Room\s*\d{1,3}|VENUE|Venue|ROOM)\b/ig;
+      const deskNearRe = /\b(?:\d{1,3}|XT|Lib\s*Sep)\b/ig;
+
+      const results = [];
+
+      // parse each page: keep track of last seen subject and dates + venues on page
+      let lastSubject = '';
+      let pageSubjects = {}; // page number => list of subjects found
+      let pageDates = {};
+      for(const p of pages){
+        const t = p.text;
+        // find subject headers on page (may be multiple)
+        const subjMatches = [];
+        let m;
+        const lines = t.split(/\r?\n/);
+        for(let i=0;i<lines.length;i++){
+          const L = lines[i];
+          const sMatch = L.match(subjHeaderRe);
+          if(sMatch){
+            const subj = (sMatch[2] || '').trim() || (sMatch[1] || '').trim();
+            subjMatches.push({line:i, text: subj || sMatch[1]});
+          }
+        }
+        pageSubjects[p.page] = subjMatches;
+
+        // find dates on page (collect)
+        const datesFound = [];
+        while((m = dateRe.exec(t)) !== null){
+          datesFound.push(m[1]);
+        }
+        pageDates[p.page] = datesFound;
+
+        // search lines for venues to map where groups start
+        const venues = [];
+        for(let i=0;i<lines.length;i++){
+          const L = lines[i];
+          let vm;
+          while((vm = venueRe.exec(L)) !== null){
+            venues.push({line:i, text: vm[1]});
+          }
+        }
+
+        // now scan lines for name candidates
+        for(let i=0;i<lines.length;i++){
+          const line = lines[i].replace(/\u00A0/g,' ').trim();
+          if(!line) continue;
+          const low = line.toLowerCase();
+
+          // check if any candidate appears in the line (allow partial matching with comma or space)
+          let matchedCandidate = null;
+          for(const c of candidates){
+            // exact word boundaries or comma variants
+            const re = new RegExp('\\b' + c.replace(/[-\/\\^$*+?.()|[\]{}]/g,'\\$&') + '\\b','i');
+            const commaRe = new RegExp('\\b' + c.replace(/ /g,',\\s*') + '\\b','i');
+            if(re.test(low) || commaRe.test(low)){
+              matchedCandidate = c;
+              break;
+            }
+            // also attempt "LAST, FIRST" style with any case and punctuation
+            const parts = c.split(' ');
+            if(parts.length==2){
+              const alt1 = parts[1] + ' ' + parts[0]; // first last
+              if(new RegExp('\\b' + alt1 + '\\b','i').test(low)) { matchedCandidate = c; break; }
+            }
+          }
+          if(!matchedCandidate) continue;
+
+          // search for desk number on same line (rightmost number)
+          let desk = null;
+          const deskMatches = [...line.matchAll(/\b(\d{1,3}|XT|Lib\s*Sep)\b/gi)];
+          if(deskMatches.length){
+            desk = deskMatches[deskMatches.length-1][1];
+          } else {
+            // look +/- 2 lines for a number (sometimes desk aligned on next column)
+            for(let j=i-2;j<=i+2;j++){
+              if(j<0||j>=lines.length) continue;
+              const l2 = lines[j];
+              const m2 = l2.match(/\b(\d{1,3}|XT|Lib\s*Sep)\b/i);
+              if(m2){ desk = m2[1]; break; }
+            }
+          }
+
+          // find nearest subject above this line (on same page)
+          let subj = lastSubject || '';
+          if(pageSubjects[p.page] && pageSubjects[p.page].length){
+            // find the subject whose line is <= i and closest
+            let candidate = null;
+            for(const s of pageSubjects[p.page]){
+              if(s.line <= i) candidate = s;
+              else break;
+            }
+            if(candidate) subj = (candidate.text || '').trim();
+            else subj = pageSubjects[p.page][0].text;
+          }
+
+          // find nearest venue (search nearby lines)
+          let venue = null;
+          // look downward a few lines first (venue often centered under group)
+          for(let j=i;j<=i+8 && j<lines.length;j++){
+            const v = lines[j].match(venueRe);
+            if(v){ venue = v[0]; break; }
+          }
+          // if not found, look upward a bit
+          if(!venue){
+            for(let j=i;j>=i-8 && j>=0;j--){
+              const v = lines[j].match(venueRe);
+              if(v){ venue = v[0]; break; }
+            }
+          }
+
+          // try to get a date from pageDates or nearby lines
+          let date = null;
+          if(pageDates[p.page] && pageDates[p.page].length) date = pageDates[p.page][0];
+          // also check lines near header area
+          for(let j=0;j<20 && j<lines.length;j++){
+            const d = lines[j].match(/(\d{1,2}\s*[A-Za-z]{3,9}\s*\d{0,4}|\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+            if(d){ date = d[1]; break; }
+          }
+
+          results.push({
+            page: p.page,
+            line: i+1,
+            rawLine: line,
+            subject: subj || '',
+            venue: venue || '',
+            desk: desk || '',
+            date: date || '',
+            matched: matchedCandidate
+          });
+        }
+
+        // update lastSubject if page has headings
+        if(pageSubjects[p.page] && pageSubjects[p.page].length){
+          const last = pageSubjects[p.page][pageSubjects[p.page].length - 1];
+          lastSubject = last.text || lastSubject;
+        }
+      } // pages loop
+
+      document.getElementById('status').textContent = `found ${results.length} potential match(es)`;
+
+      if(results.length === 0){
+        document.getElementById('results').innerHTML = '<div class="muted">no matches found.</div>';
+        return;
+      }
+
+      // show compact table
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>subject</th><th>date</th><th>venue</th><th>desk</th><th>page</th><th>line text</th></tr>';
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for(const r of results){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${escapeHtml(r.subject)}</td>
+                        <td>${escapeHtml(r.date)}</td>
+                        <td>${escapeHtml(r.venue)}</td>
+                        <td>${escapeHtml(r.desk)}</td>
+                        <td>${r.page}</td>
+                        <td style="max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.rawLine)}</td>`;
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      const container = document.getElementById('results');
+      container.innerHTML = '';
+      container.appendChild(table);
+
+      // csv download link
+      const csv = ['subject,date,venue,desk,page,line_text'];
+      for(const r of results){
+        const row = [
+          csvSafe(r.subject),
+          csvSafe(r.date),
+          csvSafe(r.venue),
+          csvSafe(String(r.desk)),
+          r.page,
+          csvSafe(r.rawLine)
+        ].join(',');
+        csv.push(row);
+      }
+      const blob = new Blob([csv.join('\n')], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'matches.csv';
+      a.textContent = 'download csv';
+      a.style.display = 'inline-block';
+      a.style.marginTop = '8px';
+      container.appendChild(a);
+
+      // helper funcs
+      function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+      function csvSafe(s){
+        if(!s) return '';
+        const t = String(s).replace(/"/g,'""');
+        return `"${t}"`;
+      }
+    };
+  }
+  </script>
+</body>
+</html>
