@@ -8,6 +8,10 @@
   ],
   "routes": [
     {
+      "src": "/0730552472",
+      "dest": "/admin_dashboard.html"
+    },
+    {
       "src": "/resources/(.*)",
       "dest": "/resources/$1",
       "headers": {
@@ -20,3 +24,4 @@
     }
   ]
 }
+
