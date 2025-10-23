@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Exams</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- ADDED: Supabase Client Library -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body {
       font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial,-serif;
@@ -54,16 +56,87 @@
             class="mt-6 px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 flex items-center gap-2">
       Find Matches
     </button>
-    
+
     <div id="status" class="text-gray-600 text-sm mt-4 flex items-center gap-2"></div>
     <div id="results" class="mt-6"></div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  
+
   <script>
+    // --- START OF SUPABASE LOGGING CODE ---
+
+    // 1. SUPABASE CONFIGURATION
+    const SUPABASE_URL = 'https://iwngyeebizqaazyulcpt.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3bmd5ZWViaXpxYWF6eXVsY3B0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1NTExOTIsImV4cCI6MjA3NjEyNzE5Mn0.tO8ky9PKHn90-gPkFeNFOkE9xmT6ki_hayRVzhkpWGg';
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // 2. UTILITY FUNCTION TO PARSE USER AGENT (for Device, OS, Browser)
+    function parseUserAgent(uaString) {
+        const ua = uaString.toLowerCase();
+        let os = 'Unknown OS', browser = 'Unknown Browser', device = 'Desktop';
+
+        // OS Detection
+        if (ua.includes('win')) os = 'Windows';
+        else if (ua.includes('mac')) os = 'macOS';
+        else if (ua.includes('android')) os = 'Android';
+        else if (ua.includes('ios') || ua.includes('iphone') || ua.includes('ipad')) os = 'iOS';
+        else if (ua.includes('linux')) os = 'Linux';
+
+        // Browser Detection
+        if (ua.includes('edg/')) browser = 'Edge';
+        else if (ua.includes('chrome') && !ua.includes('opr')) browser = 'Chrome';
+        else if (ua.includes('safari') && !ua.includes('chrome')) browser = 'Safari';
+        else if (ua.includes('firefox')) browser = 'Firefox';
+        else if (ua.includes('opr') || ua.includes('opera')) browser = 'Opera';
+
+        // Device Detection
+        if (ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')) device = 'Mobile';
+        else if (ua.includes('tablet') || ua.includes('ipad')) device = 'Tablet';
+        else if (ua.includes('x11') || ua.includes('linux') || ua.includes('windows')) device = 'Desktop'; // Catch-all for non-mobile
+
+        return { os, browser, device };
+    }
+
+    // 3. LOGGING FUNCTIONS
+
+    // Log a new visitor when the page loads
+    async function logVisitor() {
+        const { os, browser, device } = parseUserAgent(navigator.userAgent);
+        const { error } = await supabase
+            .from('visitor_logs') // Ensure this table exists in your Supabase DB
+            .insert({
+                device: device,
+                os: os,
+                browser: browser
+            });
+
+        if (error) console.error('Supabase Visitor Log Error:', error);
+    }
+
+    // Log a search query when the button is clicked
+    async function logSearchQuery(query) {
+        if (!query) return; // Don't log empty searches
+
+        const { os, browser, device } = parseUserAgent(navigator.userAgent);
+        const { error } = await supabase
+            .from('search_logs') // Ensure this table exists in your Supabase DB
+            .insert({
+                search_query: query,
+                device: device,
+                os: os,
+                browser: browser
+            });
+
+        if (error) console.error('Supabase Search Log Error:', error);
+    }
+
+    // --- END OF SUPABASE LOGGING CODE ---
+
+
     const fileBasePath = '/resources/';
     const timetableFile = 'timetable.xlsx';
+    // ... (rest of existing variables) ...
     const scheduleFiles = [
       'Acc.xlsx',
       'Afr-Drama.xlsx',
@@ -107,13 +180,13 @@
         .replace(/\n/g, ' ')
         .replace(/isixhosa/i, 'isiXhosa')
         .trim();
-      
+
       if (norm.startsWith('physical sc')) return 'physical sc';
       if (norm.startsWith('afri eat')) return 'afrikaans fal';
       if (norm.startsWith('afri hl')) return 'afrikaans hl';
       if (norm.startsWith('eng hl')) return 'english hl';
       if (norm.startsWith('eng fal')) return 'english fal';
-      
+
       return subjectNormalizationMap[norm] || norm;
     }
 
@@ -332,7 +405,7 @@
       const examDateSet = new Set(examDates);
 
       if (examDateSet.size === 0) return results;
-      
+
       const examDatesSorted = Array.from(examDateSet).sort((a, b) => a - b);
 
       // 2. Define the period to check
@@ -341,7 +414,7 @@
 
       const blockDays = [];
       const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      
+
       let current = new Date(start);
       // Loop from the start date up to and including the last exam date
       while (current.getTime() <= end.getTime()) {
@@ -389,14 +462,14 @@
       return results.sort((a, b) => {
         const da = parseDateStr(a.dateStr);
         const db = parseDateStr(b.dateStr);
-        
+
         if (!da) return 1;
         if (!db) return -1;
-        
+
         // Primary sort: Date
         const dateDiff = da.getTime() - db.getTime();
         if (dateDiff !== 0) return dateDiff;
-        
+
         // Secondary sort: Ensure Block/Weekend days are not mixed with exams if their time parsing fails.
         // Since we only add block days on non-exam days, this simple date sort works perfectly.
         return 0;
@@ -416,6 +489,9 @@
       statusEl.textContent = '';
       resultsEl.innerHTML = '';
       runButton.disabled = true;
+
+      // ADDED: Log the search query before processing
+      await logSearchQuery(q);
 
       if (!q) {
         statusEl.textContent = 'Please enter a name to search.';
@@ -582,6 +658,11 @@
       const a = document.createElement('a');
       a.href = url; a.download = 'exam_schedule.ics'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     }
+
+    // ADDED: Log visitor when the page loads
+    document.addEventListener('DOMContentLoaded', logVisitor);
+
   </script>
 </body>
 </html>
+
