@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Exams</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- ADDED: Supabase Client Library -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script> 
   <style>
     body {
       font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial,-serif;
@@ -64,75 +62,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   
   <script>
-    // --- ADDED: SUPABASE CONFIGURATION ---
-    const SUPABASE_URL = 'https://iwngyeebizqaazyulcpt.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3bmd5ZWViaXpxYWF6eXVsY3B0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1NTExOTIsImV4cCI6MjA3NjEyNzE5Mn0.tO8ky9PKHn90-gPkFeNFOkE9xmT6ki_hayRVzhkpWGg';
-    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-    // Function to extract user agent details
-    function getUserAgentInfo() {
-      const ua = navigator.userAgent;
-      let os = 'Unknown OS', browser = 'Unknown Browser', device = 'Desktop';
-
-      if (/Mobile|Android|iPhone|iPad|iPod/i.test(ua)) { device = 'Mobile'; }
-      else if (/Tablet|iPad/i.test(ua)) { device = 'Tablet'; }
-
-      if (/Windows NT/i.test(ua)) { os = 'Windows'; }
-      else if (/Macintosh|Mac OS X/i.test(ua)) { os = 'macOS'; }
-      else if (/Linux/i.test(ua)) { os = 'Linux'; }
-      else if (/Android/i.test(ua)) { os = 'Android'; }
-      else if (/iPhone|iPad|iPod/i.test(ua)) { os = 'iOS'; }
-
-      if (/CriOS|Chrome/i.test(ua)) { browser = 'Chrome'; }
-      else if (/Safari/i.test(ua)) { browser = 'Safari'; }
-      else if (/Firefox/i.test(ua)) { browser = 'Firefox'; }
-      else if (/Edg/i.test(ua)) { browser = 'Edge'; }
-
-      return { os, browser, device };
-    }
-
-    // ASYNCHRONOUS, NON-BLOCKING logging function for search queries
-    async function logSearchQuery(query) {
-        if (!supabase) return;
-
-        try {
-            const info = getUserAgentInfo();
-            const { error } = await supabase
-                .from('search_logs')
-                .insert({ search_query: query, os: info.os, browser: info.browser, device: info.device });
-
-            if (error) {
-                // Log the error to console but don't disrupt the user experience
-                console.error('Supabase Search Log Error:', error);
-            }
-        } catch (e) {
-            // Suppress errors to ensure main site functionality is NEVER blocked
-            console.error('Background Logging Error:', e);
-        }
-    }
-    
-    // ASYNCHRONOUS, NON-BLOCKING logging function for visitors
-    async function logVisitor() {
-        if (!supabase) return;
-
-        try {
-            const info = getUserAgentInfo();
-            const { error } = await supabase
-                .from('visitor_logs')
-                .insert({ os: info.os, browser: info.browser, device: info.device });
-
-            if (error) {
-                console.error('Supabase Visitor Log Error:', error);
-            }
-        } catch (e) {
-            console.error('Background Logging Error:', e);
-        }
-    }
-
-    // Call visitor log immediately on load (NON-BLOCKING)
-    document.addEventListener('DOMContentLoaded', logVisitor);
-    // --- END ADDED LOGGING FUNCTIONS ---
-    
     const fileBasePath = '/resources/';
     const timetableFile = 'timetable.xlsx';
     const scheduleFiles = [
@@ -375,6 +304,10 @@
       return results.concat(manual);
     }
 
+    /* ************************************
+     * FIX: Block Day and Weekend Logic
+     * ************************************/
+
     function parseDateStr(dateStr) {
       // Corrected month map: Oct is 9, Nov is 10, Dec is 11 (0-indexed)
       const months = { oct: 9, nov: 10, dec: 11 };
@@ -464,9 +397,15 @@
         const dateDiff = da.getTime() - db.getTime();
         if (dateDiff !== 0) return dateDiff;
         
+        // Secondary sort: Ensure Block/Weekend days are not mixed with exams if their time parsing fails.
+        // Since we only add block days on non-exam days, this simple date sort works perfectly.
         return 0;
       });
     }
+
+    /* ************************************
+     * END: FIX Block Day and Weekend Logic
+     * ************************************/
 
     const runButton = document.getElementById('run');
     const statusEl = document.getElementById('status');
@@ -483,10 +422,6 @@
         runButton.disabled = false;
         return;
       }
-      
-      // ADDED: Log the search query and immediately continue (non-blocking)
-      logSearchQuery(q); 
-      // END ADDED LOGGING
 
       const spinner = document.createElement('div');
       spinner.className = 'spinner';
@@ -650,4 +585,3 @@
   </script>
 </body>
 </html>
-
