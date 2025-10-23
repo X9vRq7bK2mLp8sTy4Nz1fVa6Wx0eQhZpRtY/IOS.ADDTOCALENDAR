@@ -98,9 +98,10 @@
 
       for(let r = 1; r < data.length; r++){
         const row = data[r].map(cell => cell.toString().trim());
-        if(!row[0]) continue;
+        if(!row[0] && !row[1]) continue; // Skip if both col0 and col1 empty
 
-        const lowName = row[0].toLowerCase().replace(/[,\.]/g,'').replace(/\s+/g,' ').trim();
+        const nameCol = row[1] ? 1 : 0;
+        const lowName = row[nameCol].toLowerCase().replace(/[,\.]/g,'').replace(/\s+/g,' ').trim();
         let matched = false;
         for(const c of candidates){
           if(lowName.includes(c)){ matched = true; break; }
@@ -118,17 +119,19 @@
           const vCol = venueCols.filter(v => v < dc).pop();
           const dCol = deskCols.filter(d => d < dc).pop();
 
-          const venue = (vCol !== undefined ? currentValues[vCol] : '') || 'N/A';
-          const desk = (dCol !== undefined ? currentValues[dCol] : '') || '';
+          const venue = (vCol !== undefined ? currentValues[vCol] : '');
+          const desk = (dCol !== undefined ? currentValues[dCol] : '');
 
-          results.push({
-            subject,
-            paper: dateInfo.paper,
-            dateStr: dateInfo.dateStr,
-            venue,
-            desk,
-            sheet: sheetName
-          });
+          if(venue && desk) {
+            results.push({
+              subject,
+              paper: dateInfo.paper,
+              dateStr: dateInfo.dateStr,
+              venue,
+              desk,
+              sheet: sheetName
+            });
+          }
         }
       }
     }
@@ -174,7 +177,7 @@
         const ymd = dateObj.toISOString().slice(0,10).replace(/-/g,'');
 
         const paperStr = r.paper ? `${r.paper} ` : '';
-        const title = `${r.subject} ${paperStr}Exam`;
+        const title = `${r.subject} ${paperStr}Exam, Class ${r.venue}, Desk ${r.desk}`;
         const desc = `Venue: ${r.venue}\nDesk: ${r.desk}`;
 
         const uid = `${r.subject.replace(/\s+/g,'')}-${r.paper || 'single'}-${ymd}@example.com`;
